@@ -1,0 +1,6 @@
+torch==1.8.1+cu101
+torchvision==0.9.1+cu101
+wandb==0.13.5
+mmcv==1.7.0
+tqdm==4.64.1
+torch-geometric==2.2.0
