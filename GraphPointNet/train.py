@@ -20,13 +20,10 @@ config = Config.fromfile('GraphPointNet/config.py')
 device = config.DEVICE
 debug = config.DEBUG
 
-train_split = config.DATASET.TRAIN_SPLIT
-val_split = config.DATASET.VAL_SPLIT
-
 batch_size = config.DATALOADER.BATCH_SIZE
 num_workers = config.DATALOADER.NUM_WORKERS
 
-criterion = config.SOLVER.CRITERION
+# criterion = config.SOLVER.CRITERION
 lr = config.SOLVER.LR
 epochs = config.SOLVER.EPOCHS
 scheduler = config.SOLVER.SCHEDULER
