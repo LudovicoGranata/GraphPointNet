@@ -1,4 +1,6 @@
 #https://pytorch-geometric.readthedocs.io/en/latest/modules/nn.html#torch_geometric.nn.conv.GCNConv
+#https://github.com/pyg-team/pytorch_geometric/issues/973
+#https://colab.research.google.com/drive/1I8a0DfQ3fI7Njc62__mVXUlcAleUclnb?usp=sharing
 from itertools import combinations
 import torch.nn as nn
 import torch
@@ -26,11 +28,8 @@ class get_model(nn.Module):
         self.drop1 = nn.Dropout(0.5)
         self.conv2 = nn.Conv1d(128, num_classes, 1)
         self.GCN = GCN(128, 128)
-        self.relu = nn.ReLU()
-        # self.edge_index_batch = torch.randint(0, 2500-1, (2, 1000)).to("cuda:0") # edge index shape (B, 2, num_edges)
 
-
-        # add fc layers
+        # TODO delete this
         self.fc1 = nn.Linear(128, 128)
         self.fc2 = nn.Linear(128, num_classes)
 
@@ -51,15 +50,9 @@ class get_model(nn.Module):
         l1_points = self.fp2(l1_xyz, l2_xyz, l1_points, l2_points)
         cls_label_one_hot = cls_label.view(B,16,1).repeat(1,1,N)
         l0_points = self.fp1(l0_xyz, l1_xyz, torch.cat([cls_label_one_hot,l0_xyz,l0_points],1), l1_points)
-        # FC layers
-        # TODO here put a GCN
-        #build the adjacency matrix (ball query?)
-        # adjacency_matrix = torch.ones([l0_points.shape[2], l0_points.shape[2]], dtype=torch.bool)
-        # Create a tensor of sequential integers from 0 to num_nodes-1
-        # num_nodes = 2500
-        # how do I build the edge index?
 
         x = self.GCN(l0_points.permute(0,2,1), point_graph).permute(0,2,1)# l0_points shape (B, N, F)
+        
         # x = self.fc1(self.relu(x))
         # x = self.fc2(self.relu(x))
         # x = F.log_softmax(x, dim=2)
@@ -70,26 +63,30 @@ class get_model(nn.Module):
         x = self.conv2(x)
         x = F.log_softmax(x, dim=1)
         x = x.permute(0, 2, 1)
+
         return x, l3_points
 
 class GCN (nn.Module):
     def __init__(self, in_channels, out_channels):
         super(GCN, self).__init__()
-        self.conv_1 = pyg_nn.GCNConv(in_channels, in_channels)
-        self.conv_2 = pyg_nn.GCNConv(in_channels, out_channels)
-        self.relu = nn.ReLU()
+        self.conv_1 = pyg_nn.GCNConv(in_channels, 256)
+        self.conv_2 = pyg_nn.GCNConv(256, 256)
+        self.conv_3 = pyg_nn.GCNConv(256, out_channels)
+        self.drop1 = nn.Dropout(0.4)
 
     def forward(self, x, batch_edge_index):
-        result = []
-        for x_i, edge_index in zip(x, batch_edge_index):
-            x_i = self.conv_1(x_i, edge_index)
-            x_i = self.relu(x_i)
-            x_i = self.conv_2(x_i, edge_index)
-            result.append(x_i)
-        
-        result = torch.stack(result, dim=0)
-        return result
 
+        #reshape x to (B*N, F)
+        n_batch = x.shape[0]
+        n_points = x.shape[1]
+        x = x.reshape(-1, x.shape[-1])
+
+        x = F.relu(self.conv_1(x, batch_edge_index))
+        x = F.relu(self.conv_2(x, batch_edge_index))
+        x = self.drop1(x)
+        x = F.relu(self.conv_3(x, batch_edge_index))
+        x = x.reshape(n_batch, n_points, x.shape[-1])
+        return x
 
 class get_loss(nn.Module):
     def __init__(self):

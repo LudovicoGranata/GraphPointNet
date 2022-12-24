@@ -64,16 +64,16 @@ def main():
     #============LOAD DATA===============
     #------------------------------------
     print("Load data...")
-    data_train = PartNormalDataset(split="train", npoints=npoints, debug=debug)
+    data_train = PartNormalDataset(split="train", npoints=npoints, config=config, debug=debug)
 
     # TRAIN DATA
-    dl_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True, drop_last=True)
+    dl_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True, drop_last=True, collate_fn=data_train.my_collate)
 
     # VAL DATA
-    data_val = PartNormalDataset(split="val", npoints=npoints, debug=debug)
+    data_val = PartNormalDataset(split="val", npoints=npoints, config=config, debug=debug)
 
 
-    dl_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    dl_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, collate_fn=data_val.my_collate)
 
     #============MODEL===============
     #--------------------------------
@@ -106,6 +106,7 @@ def main():
     if (load_checkpoint and exists(load_checkpoint_path)):
         checkpoint = torch.load(load_checkpoint_path)
         start_epoch = checkpoint['epoch']
+
         model.load_state_dict(checkpoint['model_state_dict'])
         # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
@@ -183,19 +184,19 @@ def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
     loss_train = 0
     mean_correct = []
     model.train()
-    for idx_batch, (points, label, target) in tqdm(enumerate(dl_train), total=len(dl_train), smoothing=0.9):
+    for idx_batch, data in tqdm(enumerate(dl_train), total=len(dl_train), smoothing=0.9):
         optimizer.zero_grad()
-        
+        points, label, target, edge_list = data["points"], data["label"], data["target"], data["edge_list"]
         points = points.data.numpy()
         points[:, :, 0:3] = provider.random_scale_point_cloud(points[:, :, 0:3])
         points[:, :, 0:3] = provider.shift_point_cloud(points[:, :, 0:3])
         points = torch.Tensor(points)
-        points, label, target = points.float(), label.long().to(device), target.long().to(device)
+        points, label, target, edge_list = points.float().to(device), label.long().to(device), target.long().to(device), edge_list.to(device)
         points = points.transpose(2, 1)
-        point_graph = build_edge_index(points, num_connections=3)
-        points, point_graph = points.to(device), point_graph.to(device)
+        # point_graph = build_edge_index(points, num_connections=3)
+        # points, point_graph = points.to(device), point_graph.to(device)
 
-        seg_pred, trans_feat = model(points, to_categorical(label, num_classes), point_graph)
+        seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
         seg_pred = seg_pred.contiguous().view(-1, num_part)
         target = target.view(-1, 1)[:, 0]
         pred_choice = seg_pred.data.max(1)[1]
@@ -233,13 +234,15 @@ def validate(model, dl_val, criterion, device):
 
         model = model.eval()
 
-        for batch_id, (points, label, target) in tqdm(enumerate(dl_val), total=len(dl_val), smoothing=0.9):
+        for batch_id, data in tqdm(enumerate(dl_val), total=len(dl_val), smoothing=0.9):
+
+            points, label, target, edge_list = data["points"], data["label"], data["target"], data["edge_list"]
             cur_batch_size, NUM_POINT, _ = points.size()
-            points, label, target = points.float(), label.long().to(device), target.long().to(device)
+            points, label, target, edge_list = points.float().to(device), label.long().to(device), target.long().to(device), edge_list.to(device)
             points = points.transpose(2, 1)
-            point_graph = build_edge_index(points, num_connections=3)
-            points, point_graph = points.to(device), point_graph.to(device)
-            seg_pred, _ = model(points, to_categorical(label, num_classes), point_graph)
+            # point_graph = build_edge_index(points, num_connections=3)
+            # points, point_graph = points.to(device), point_graph.to(device)
+            seg_pred, _ = model(points, to_categorical(label, num_classes), edge_list)
             cur_pred_val = seg_pred.cpu().data.numpy()
             cur_pred_val_logits = cur_pred_val
             cur_pred_val = np.zeros((cur_batch_size, NUM_POINT)).astype(np.int32)
@@ -286,38 +289,6 @@ def validate(model, dl_val, criterion, device):
 
 
     return test_metrics
-
-
-def build_edge_index(points, num_connections):
-
-
-    batch_edge_index = []
-    for i in range(points.shape[0]):
-
-
-        # Convert points tensor to a NumPy array
-        points_array = points[i].numpy()
-
-        # Flatten the points array to shape [n_points, n_dimensions]
-        points_array = points_array.reshape(points_array.shape[-1], -1)
-
-        if num_connections >= points_array.shape[0]:
-            num_connections = points_array.shape[0]-1
-
-        # Build a KD-tree from the points
-        tree = cKDTree(points_array)
-
-        # Find the indices and distances of the k nearest neighbors for each point
-        edges = tree.query(points_array, k=num_connections)
-
-        # Extract the indices of the nearest neighbors, ignoring the point itself
-        nearest_neighbors = edges[1][:, 1:]
-
-        # Flatten the nearest neighbors array to shape [2, n_edges]
-        edge_index = nearest_neighbors.reshape(2, -1)
-        batch_edge_index.append(edge_index)
-
-    return torch.tensor(batch_edge_index, dtype=torch.long)
 
 if __name__ == "__main__":
     main()
