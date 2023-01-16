@@ -37,7 +37,7 @@ load_checkpoint_path = config.TRAIN.LOAD_CHECKPOINT_PATH
 wandb_log = config.TRAIN.WANDB_LOG
 project_name = config.TRAIN.WANDB_PROJECT
 
-npoints = 2500
+npoints = config.DATASET.NUMBER_OF_POINTS
 
 seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43],
                'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37],
@@ -70,9 +70,7 @@ def main():
     dl_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True, drop_last=True, collate_fn=data_train.my_collate)
 
     # VAL DATA
-    data_val = PartNormalDataset(split="val", npoints=npoints, config=config, debug=debug)
-
-
+    data_val = PartNormalDataset(split="test", npoints=npoints, config=config, debug=debug)
     dl_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, collate_fn=data_val.my_collate)
 
     #============MODEL===============
@@ -103,12 +101,15 @@ def main():
     #============LOAD================
     #--------------------------------
     start_epoch = 0
-    if (load_checkpoint and exists(load_checkpoint_path)):
-        checkpoint = torch.load(load_checkpoint_path)
-        start_epoch = checkpoint['epoch']
+    if (load_checkpoint):
+        if exists(load_checkpoint_path):
+            checkpoint = torch.load(load_checkpoint_path)
+            start_epoch = checkpoint['epoch']
 
-        model.load_state_dict(checkpoint['model_state_dict'])
-        # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            model.load_state_dict(checkpoint['model_state_dict'])
+            # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        else:
+            raise ValueError("Checkpoint not found")
 
 
     #============TRAIN===============
@@ -184,6 +185,10 @@ def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
     loss_train = 0
     mean_correct = []
     model.train()
+    lr = max(0.001 * (0.5 ** (epoch // 20)), 1e-5)
+    print(f'Learning rate: {lr:.8f}')
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
     for idx_batch, data in tqdm(enumerate(dl_train), total=len(dl_train), smoothing=0.9):
         optimizer.zero_grad()
         points, label, target, edge_list = data["points"], data["label"], data["target"], data["edge_list"]
@@ -193,9 +198,6 @@ def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
         points = torch.Tensor(points)
         points, label, target, edge_list = points.float().to(device), label.long().to(device), target.long().to(device), edge_list.to(device)
         points = points.transpose(2, 1)
-        # point_graph = build_edge_index(points, num_connections=3)
-        # points, point_graph = points.to(device), point_graph.to(device)
-
         seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
         seg_pred = seg_pred.contiguous().view(-1, num_part)
         target = target.view(-1, 1)[:, 0]
@@ -284,6 +286,8 @@ def validate(model, dl_val, criterion, device):
         test_metrics['accuracy'] = total_correct / float(total_seen)
         test_metrics['class_avg_accuracy'] = np.mean(
             np.array(total_correct_class) / np.array(total_seen_class, dtype=np.float))
+        for cat in sorted(shape_ious.keys()):
+            print('eval mIoU of %s %f' % (cat + ' ' * (14 - len(cat)), shape_ious[cat]))
         test_metrics['class_avg_iou'] = mean_shape_ious
         test_metrics['inctance_avg_iou'] = np.mean(all_shape_ious)
 
