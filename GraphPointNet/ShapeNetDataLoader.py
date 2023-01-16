@@ -25,7 +25,6 @@ class PartNormalDataset(Dataset):
         self.normal_channel = normal_channel
         self.config = config
 
-
         with open(self.catfile, 'r') as f:
             for line in f:
                 ls = line.strip().split()
@@ -94,9 +93,6 @@ class PartNormalDataset(Dataset):
                             'Table': [47, 48, 49], 'Airplane': [0, 1, 2, 3], 'Pistol': [38, 39, 40],
                             'Chair': [12, 13, 14, 15], 'Knife': [22, 23]}
 
-        # for cat in sorted(self.seg_classes.keys()):
-        #     print(cat, self.seg_classes[cat])
-
         self.cache = {}  # from index to (point_set, cls, seg) tuple
         self.cache_size = 20000
 
@@ -135,10 +131,8 @@ class PartNormalDataset(Dataset):
     
     def build_edge_index(self, points):
 
+        #number of connections for each point
         num_connections = self.config.DATASET.NUM_CONNECTIONS
-
-        # Flatten the points array to shape [n_points, n_dimensions]
-        # points = points.reshape(points.shape[-1], -1)
 
         if num_connections >= points.shape[0]:
             num_connections = points.shape[0]-1
@@ -150,19 +144,12 @@ class PartNormalDataset(Dataset):
         edges = tree.query(points, k=num_connections+1)
 
         # Extract the indices of the nearest neighbors, ignoring the point itself
-        nearest_neighbors = edges[1][:, 1:]
-        adjacency_matrix = np.zeros((points.shape[0], points.shape[0]))
-        for i in range(points.shape[0]):
-            for j in range(num_connections):
-                adjacency_matrix[i, nearest_neighbors[i,j]] = 1
-                adjacency_matrix[nearest_neighbors[i,j], i] = 1
-               
-
-
-        # Flatten the nearest neighbors array to shape [2, n_edges]
-        # edge_index = nearest_neighbors.reshape(2, -1)
-
-        # return edge_index
+        nearest_neighbors = edges[1][:, 1:num_connections+1]
+        
+        # I select each point with np.arange, then for each of these point I select the nearest neighbors
+        adjacency_matrix = np.zeros((points.shape[0], points.shape[0]))      
+        adjacency_matrix[np.arange(points.shape[0])[:, None], nearest_neighbors] = 1
+        
         return adjacency_matrix
 
     def my_collate(self, batch):
@@ -176,9 +163,6 @@ class PartNormalDataset(Dataset):
         cls = torch.tensor(cls, dtype=torch.long)
         seg = torch.tensor(seg, dtype=torch.long)
         graph = block_diag(*graph)
-        #!too slow
-        # edge_list = torch.tensor([graph[i, j] for i in range(graph.shape[0]) for j in range(graph.shape[1]) if graph[i, j] == 1])
-
         rows, cols = np.where(graph == 1)
         edge_list = torch.tensor(list(zip(rows, cols)), dtype=torch.long).permute(1,0)
         return {"points":point_set, "label":cls, "target":seg, "edge_list":edge_list}

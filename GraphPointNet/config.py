@@ -5,6 +5,8 @@ DEBUG = False
 # Dataset
 # -------------------------------------------------------------------------
 DATASET = dict(
+    NUM_CONNECTIONS = 10,
+    NUMBER_OF_POINTS = 2500
 )
 
 # -----------------------------------------------------------------------------
@@ -12,7 +14,7 @@ DATASET = dict(
 # -----------------------------------------------------------------------------
 DATALOADER = dict(
     BATCH_SIZE = 4,
-    NUM_WORKERS = 3
+    NUM_WORKERS = 4
 )
 
 MODEL = dict(
@@ -23,7 +25,7 @@ MODEL = dict(
 # ---------------------------------------------------------------------------- #
 SOLVER = dict(
     LR = 0.001,
-    EPOCHS = 100,
+    EPOCHS = 300,
     SCHEDULER = True,
     SCHEDULER_NAME = "ExponentialLR",
     GAMMA = 0.98,
@@ -35,7 +37,7 @@ SOLVER = dict(
 TRAIN = dict(
     SAVE_CHECKPOINT = True,
     SAVE_CHECKPOINT_PATH = "checkpoints/GPN/GPN.pth",
-    LOAD_CHECKPOINT = True,
+    LOAD_CHECKPOINT = False,
     LOAD_CHECKPOINT_PATH = "checkpoints/GPN/GPN.pth",
     WANDB_LOG = False,
     WANDB_PROJECT = "GPN",
@@ -45,5 +47,6 @@ TRAIN = dict(
 # Specific test options
 # ---------------------------------------------------------------------------- #
 TEST = dict(
-    LOAD_CHECKPOINT_PATH = "checkpoints/GPN/GPN.pth",
+    LOAD_CHECKPOINT_PATH = "checkpoints/GPN/GPN_77e.pth",
+    VISUALIZE = False,
 )
