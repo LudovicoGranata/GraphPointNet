@@ -30,8 +30,8 @@ class get_model(nn.Module):
         self.GCN = GCN(128, 128)
 
         # TODO delete this
-        self.fc1 = nn.Linear(128, 128)
-        self.fc2 = nn.Linear(128, num_classes)
+        # self.fc1 = nn.Linear(128, 128)
+        # self.fc2 = nn.Linear(128, num_classes)
 
     def forward(self, xyz, cls_label, point_graph):
         # Set Abstraction layers
@@ -53,6 +53,7 @@ class get_model(nn.Module):
 
         x = self.GCN(l0_points.permute(0,2,1), point_graph).permute(0,2,1)# l0_points shape (B, N, F)
         
+        # TODO delete this
         # x = self.fc1(self.relu(x))
         # x = self.fc2(self.relu(x))
         # x = F.log_softmax(x, dim=2)
@@ -73,6 +74,7 @@ class GCN (nn.Module):
         self.conv_2 = pyg_nn.GCNConv(256, 256)
         self.conv_3 = pyg_nn.GCNConv(256, out_channels)
         self.drop1 = nn.Dropout(0.4)
+        # self.bn1 = nn.BatchNorm1d(128)
 
     def forward(self, x, batch_edge_index):
 
@@ -82,6 +84,7 @@ class GCN (nn.Module):
         x = x.reshape(-1, x.shape[-1])
 
         x = F.relu(self.conv_1(x, batch_edge_index))
+        x = self.drop1(x)
         x = F.relu(self.conv_2(x, batch_edge_index))
         x = self.drop1(x)
         x = F.relu(self.conv_3(x, batch_edge_index))
