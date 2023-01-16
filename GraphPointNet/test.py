@@ -24,8 +24,9 @@ num_workers = config.DATALOADER.NUM_WORKERS
 
 # criterion = config.SOLVER.CRITERION
 load_checkpoint_path = config.TEST.LOAD_CHECKPOINT_PATH
+visualize = config.TEST.VISUALIZE
 
-npoints = 2500
+npoints = config.DATASET.NUMBER_OF_POINTS
 
 seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43],
                'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37],
@@ -81,12 +82,12 @@ def main():
     test(
         model,
         dl_test,
-        criterion,
+        visualize,
         device)
     print("Testing complete")
 
 
-def test(model, dl_val, criterion, device):
+def test(model, dl_val, visualize, device):
     with torch.no_grad():
         test_metrics = {}
         total_correct = 0
@@ -143,17 +144,18 @@ def test(model, dl_val, criterion, device):
                             np.sum((segl == l) | (segp == l)))
                 shape_ious[cat].append(np.mean(part_ious))
             #visualize
-            for i in range(cur_batch_size):
-                name = f'{batch_id}_{i}'
-                visualize_path_prediction = os.path.join("visualize", f'{name}.ply')
-                visualize_path_prediction_gt = os.path.join("visualize", f'{name}_gt.ply')
-                os.makedirs(os.path.dirname(visualize_path_prediction), exist_ok=True)
+            if visualize:
+                for i in range(cur_batch_size):
+                    name = f'{batch_id}_{i}'
+                    visualize_path_prediction = os.path.join("visualize", f'{name}.ply')
+                    visualize_path_prediction_gt = os.path.join("visualize", f'{name}_gt.ply')
+                    os.makedirs(os.path.dirname(visualize_path_prediction), exist_ok=True)
 
-                prediction = cur_pred_val[i, :]
-                target_i = target[i, :]
-                points_i = points[i, :, :].cpu().data.numpy()
-                visualize_point_cloud(points_i, prediction, visualize_path_prediction)
-                visualize_point_cloud(points_i, target_i, visualize_path_prediction_gt)               
+                    prediction = cur_pred_val[i, :]
+                    target_i = target[i, :]
+                    points_i = points[i, :, :].cpu().data.numpy()
+                    visualize_point_cloud(points_i, prediction, visualize_path_prediction)
+                    visualize_point_cloud(points_i, target_i, visualize_path_prediction_gt)               
 
 
 
@@ -166,9 +168,15 @@ def test(model, dl_val, criterion, device):
         test_metrics['accuracy'] = total_correct / float(total_seen)
         test_metrics['class_avg_accuracy'] = np.mean(
             np.array(total_correct_class) / np.array(total_seen_class, dtype=np.float))
+        for cat in sorted(shape_ious.keys()):
+            print('eval mIoU of %s %f' % (cat + ' ' * (14 - len(cat)), shape_ious[cat]))
         test_metrics['class_avg_iou'] = mean_shape_ious
         test_metrics['inctance_avg_iou'] = np.mean(all_shape_ious)
 
+    print('Accuracy is: %.5f' % test_metrics['accuracy'])
+    print('Class avg accuracy is: %.5f' % test_metrics['class_avg_accuracy'])
+    print('Class avg mIOU is: %.5f' % test_metrics['class_avg_iou'])
+    print('Inctance avg mIOU is: %.5f' % test_metrics['inctance_avg_iou'])
 
     return test_metrics
 
