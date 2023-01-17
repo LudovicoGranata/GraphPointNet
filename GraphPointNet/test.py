@@ -15,18 +15,24 @@ from visualization import visualize_point_cloud
 
 #CONFIG
 config = Config.fromfile('GraphPointNet/config.py')
-
+if config.MODEL.NAME == "PNPP":
+    from pointnet2_model import get_model, get_loss
+elif config.MODEL.NAME == "GPN":
+    from model import get_model, get_loss
+else:
+    raise ValueError("Model not found")
 device = config.DEVICE
-debug = config.DEBUG
 
 batch_size = config.DATALOADER.BATCH_SIZE
 num_workers = config.DATALOADER.NUM_WORKERS
+cache = config.DATALOADER.CACHE
 
 # criterion = config.SOLVER.CRITERION
 load_checkpoint_path = config.TEST.LOAD_CHECKPOINT_PATH
 visualize = config.TEST.VISUALIZE
 
 npoints = config.DATASET.NUMBER_OF_POINTS
+normal_channel = config.DATASET.NORMAL_CHANNEL
 
 seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43],
                'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37],
@@ -53,7 +59,7 @@ def main():
     #============LOAD DATA===============
     #------------------------------------
     print("Load data...")
-    data_test = PartNormalDataset(split="test", npoints=npoints, config=config, debug=debug)
+    data_test = PartNormalDataset(split="test", npoints=npoints,normal_channel=normal_channel, config=config, cache=cache)
 
     # TRAIN DATA
     dl_test = torch.utils.data.DataLoader(data_test, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, drop_last=True, collate_fn=data_test.my_collate)
@@ -111,7 +117,10 @@ def test(model, dl_val, visualize, device):
             points = points.transpose(2, 1)
             # point_graph = build_edge_index(points, num_connections=3)
             # points, point_graph = points.to(device), point_graph.to(device)
-            seg_pred, _ = model(points, to_categorical(label, num_classes), edge_list)
+            if config.MODEL.NAME == "GPN":
+                seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
+            else:
+                seg_pred, trans_feat = model(points, to_categorical(label, num_classes))
             cur_pred_val = seg_pred.cpu().data.numpy()
             cur_pred_val_logits = cur_pred_val
             cur_pred_val = np.zeros((cur_batch_size, NUM_POINT)).astype(np.int32)
