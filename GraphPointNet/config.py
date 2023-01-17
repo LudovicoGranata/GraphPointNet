@@ -1,23 +1,29 @@
 DEVICE = "cuda:0" # cuda:0
-DEBUG = False
+DEBUG = dict(
+    ENABLE = False,
+    NUM_SAMPLES = 20,
+    )
 
 # -----------------------------------------------------------------------------
 # Dataset
 # -------------------------------------------------------------------------
 DATASET = dict(
-    NUM_CONNECTIONS = 10,
-    NUMBER_OF_POINTS = 2500
-)
+    NUM_CONNECTIONS = 3,
+    NUMBER_OF_POINTS = 2048,
+    NORMAL_CHANNEL = True
+    )
 
 # -----------------------------------------------------------------------------
 # DataLoader
 # -----------------------------------------------------------------------------
 DATALOADER = dict(
     BATCH_SIZE = 4,
-    NUM_WORKERS = 4
+    NUM_WORKERS = 4,
+    CACHE = True,
 )
 
 MODEL = dict(
+    NAME = "GPN" # GPN | PNPP
 )
 
 # ---------------------------------------------------------------------------- #
@@ -26,9 +32,9 @@ MODEL = dict(
 SOLVER = dict(
     LR = 0.001,
     EPOCHS = 300,
-    SCHEDULER = True,
-    SCHEDULER_NAME = "ExponentialLR",
-    GAMMA = 0.98,
+    MIN_LR = 1e-5,
+    LR_DECAY = 0.5,
+    LR_STEP_SIZE = 20
 )
 
 # ---------------------------------------------------------------------------- #

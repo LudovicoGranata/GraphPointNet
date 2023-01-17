@@ -10,25 +10,28 @@ from model import get_model, get_loss
 from tqdm import tqdm
 import numpy as np
 import provider
-from scipy.spatial import cKDTree
-
+import logging
+from datetime import datetime
 
 
 #CONFIG
 config = Config.fromfile('GraphPointNet/config.py')
+if config.MODEL.NAME == "PNPP":
+    from pointnet2_model import get_model, get_loss
+elif config.MODEL.NAME == "GPN":
+    from model import get_model, get_loss
+else:
+    raise ValueError("Model not found")
 
 device = config.DEVICE
-debug = config.DEBUG
 
 batch_size = config.DATALOADER.BATCH_SIZE
 num_workers = config.DATALOADER.NUM_WORKERS
+cache = config.DATALOADER.CACHE
 
 # criterion = config.SOLVER.CRITERION
 lr = config.SOLVER.LR
 epochs = config.SOLVER.EPOCHS
-scheduler = config.SOLVER.SCHEDULER
-scheduler_name = config.SOLVER.SCHEDULER_NAME
-gamma = config.SOLVER.GAMMA
 
 save_checkpoint = config.TRAIN.SAVE_CHECKPOINT
 save_checkpoint_path = config.TRAIN.SAVE_CHECKPOINT_PATH
@@ -36,6 +39,7 @@ load_checkpoint = config.TRAIN.LOAD_CHECKPOINT
 load_checkpoint_path = config.TRAIN.LOAD_CHECKPOINT_PATH
 wandb_log = config.TRAIN.WANDB_LOG
 project_name = config.TRAIN.WANDB_PROJECT
+normal_channel = config.DATASET.NORMAL_CHANNEL
 
 npoints = config.DATASET.NUMBER_OF_POINTS
 
@@ -51,7 +55,6 @@ for cat in seg_classes.keys():
 num_classes = 16
 num_part = 50
 
-
 def to_categorical(y, num_classes):
     """ 1-hot encodes a tensor """
     new_y = torch.eye(num_classes)[y.cpu().data.numpy(),]
@@ -60,17 +63,17 @@ def to_categorical(y, num_classes):
     return new_y
 
 def main():
-
+    logger.info("Initiate training...")
     #============LOAD DATA===============
     #------------------------------------
-    print("Load data...")
-    data_train = PartNormalDataset(split="train", npoints=npoints, config=config, debug=debug)
+    logger.info("Load data...")
+    data_train = PartNormalDataset(split="train", npoints=npoints,normal_channel=normal_channel, config=config, cache=cache)
 
     # TRAIN DATA
     dl_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True, drop_last=True, collate_fn=data_train.my_collate)
 
     # VAL DATA
-    data_val = PartNormalDataset(split="test", npoints=npoints, config=config, debug=debug)
+    data_val = PartNormalDataset(split="test", npoints=npoints, normal_channel=normal_channel, config=config, cache=cache)
     dl_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, collate_fn=data_val.my_collate)
 
     #============MODEL===============
@@ -88,15 +91,14 @@ def main():
 
     #============WRITER==============
     if wandb_log:
-        wandb.init(project=project_name, settings=wandb.Settings(start_method='fork'))
-
-    #============SCHEDULER===============
-    #------------------------------------
-    lr_scheduler = None
-    if ( scheduler_name == 'ExponentialLR'):
-        lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=gamma)
-    else:
-        raise ValueError("Scheduler not supported")
+        os_start_method = 'spawn' if os.name == 'nt' else 'fork'
+        run_datetime = datetime.now().isoformat().split('.')[0]
+        wandb.init(
+        project=project_name,
+        name=run_datetime, 
+        settings=wandb.Settings(start_method=os_start_method),
+        config = config
+        )
 
     #============LOAD================
     #--------------------------------
@@ -114,27 +116,23 @@ def main():
 
     #============TRAIN===============
     #--------------------------------
-    print("Training...")
+    logger.info("Training...")
     training_loop(
         model,
         dl_train,
         dl_val,
         criterion,
         optimizer,
-        scheduler,
-        lr_scheduler,
         epochs,
         start_epoch,
         save_checkpoint,
         save_checkpoint_path,
         wandb_log,
         device)
-    print("Training complete")
+    logger.info("Training complete")
 
 
-def training_loop(model, dl_train, dl_val, criterion, optimizer, scheduler, lr_scheduler, epochs, start_epoch, save_checkpoint, save_checkpoint_path, wandb_log,  device):
-    losses_values = []
-    val_losses_values = []
+def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_epoch, save_checkpoint, save_checkpoint_path, wandb_log,  device):
 
     for epoch in range(start_epoch, epochs):
         train_accuracy = train(
@@ -161,10 +159,8 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, scheduler, lr_s
             }, save_checkpoint_path)
 
         lr =  optimizer.param_groups[0]['lr']
-        if scheduler:
-            lr_scheduler.step()
 
-        print(f'Epoch: {epoch} '
+        logger.info(f'Epoch: {epoch} '
               f' Lr: {lr:.8f} '
               f' Accuracy : Train_accuracy = [{train_accuracy:.3E}]'
               f' Val_accuracy = [{val_metrics["accuracy"]:.3E}]]'
@@ -182,11 +178,12 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, scheduler, lr_s
 
 
 def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
-    loss_train = 0
+
     mean_correct = []
     model.train()
-    lr = max(0.001 * (0.5 ** (epoch // 20)), 1e-5)
-    print(f'Learning rate: {lr:.8f}')
+    lr = max(config.SOLVER.LR * (config.SOLVER.LR_DECAY ** (epoch // config.SOLVER.LR_STEP_SIZE)), config.SOLVER.MIN_LR)
+    
+    logger.info(f'Learning rate: {lr:.8f}')
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     for idx_batch, data in tqdm(enumerate(dl_train), total=len(dl_train), smoothing=0.9):
@@ -198,7 +195,10 @@ def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
         points = torch.Tensor(points)
         points, label, target, edge_list = points.float().to(device), label.long().to(device), target.long().to(device), edge_list.to(device)
         points = points.transpose(2, 1)
-        seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
+        if config.MODEL.NAME == "GPN":
+            seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
+        else:
+            seg_pred, trans_feat = model(points, to_categorical(label, num_classes))
         seg_pred = seg_pred.contiguous().view(-1, num_part)
         target = target.view(-1, 1)[:, 0]
         pred_choice = seg_pred.data.max(1)[1]
@@ -214,7 +214,7 @@ def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
             wandb.log({'Accuracy': np.mean(mean_correct), 'Global_step': global_step})
 
     train_instance_acc = np.mean(mean_correct)
-    print('Train accuracy is: %.5f' % train_instance_acc)
+    logger.info('Train accuracy is: %.5f' % train_instance_acc)
     return train_instance_acc
 
 
@@ -244,7 +244,11 @@ def validate(model, dl_val, criterion, device):
             points = points.transpose(2, 1)
             # point_graph = build_edge_index(points, num_connections=3)
             # points, point_graph = points.to(device), point_graph.to(device)
-            seg_pred, _ = model(points, to_categorical(label, num_classes), edge_list)
+            if config.MODEL.NAME == "GPN":
+                seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
+            else:
+                seg_pred, trans_feat = model(points, to_categorical(label, num_classes))
+
             cur_pred_val = seg_pred.cpu().data.numpy()
             cur_pred_val_logits = cur_pred_val
             cur_pred_val = np.zeros((cur_batch_size, NUM_POINT)).astype(np.int32)
@@ -287,12 +291,37 @@ def validate(model, dl_val, criterion, device):
         test_metrics['class_avg_accuracy'] = np.mean(
             np.array(total_correct_class) / np.array(total_seen_class, dtype=np.float))
         for cat in sorted(shape_ious.keys()):
-            print('eval mIoU of %s %f' % (cat + ' ' * (14 - len(cat)), shape_ious[cat]))
+            logger.info('eval mIoU of %s %f' % (cat + ' ' * (14 - len(cat)), shape_ious[cat]))
         test_metrics['class_avg_iou'] = mean_shape_ious
         test_metrics['inctance_avg_iou'] = np.mean(all_shape_ious)
 
 
     return test_metrics
 
+def set_logger(log_file):
+
+    global logger 
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # Logging to a file
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s: %(message)s'))
+    logger.addHandler(file_handler)
+
+    # Logging to console
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter('%(message)s'))
+    logger.addHandler(stream_handler)
+
+    return logger
+
 if __name__ == "__main__":
+    log_file = datetime.now().isoformat().split('.')[0] + '.txt'
+    # os joint path
+    log_file = os.path.join("logs", log_file)
+    # if folder not exist, create it
+    if not os.path.exists(os.path.dirname(log_file)):
+        os.makedirs(os.path.dirname(log_file))
+    set_logger(log_file)
     main()
