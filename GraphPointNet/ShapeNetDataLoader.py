@@ -17,7 +17,7 @@ def pc_normalize(pc):
     return pc
 
 class PartNormalDataset(Dataset):
-    def __init__(self,root = 'data/shapenetcore_partanno_segmentation_benchmark_v0_normal', npoints=2500, split='train', class_choice=None, normal_channel=False, config=None, debug=False):
+    def __init__(self,root = 'data/shapenetcore_partanno_segmentation_benchmark_v0_normal', npoints=2500, split='train', class_choice=None, normal_channel=False, config=None, cache=True):
         self.npoints = npoints
         self.root = root
         self.catfile = os.path.join(self.root, 'synsetoffset2category.txt')
@@ -40,18 +40,8 @@ class PartNormalDataset(Dataset):
         with open(os.path.join(self.root, 'train_test_split', 'shuffled_train_file_list.json'), 'r') as f:
 
             train_ids = set([str(d.split('/')[2]) for d in json.load(f)])
-            if debug:
-                train_ids_debug = set()
-                for i in range(500):
-                    train_ids_debug.add(train_ids.pop())
-                train_ids = train_ids_debug
         with open(os.path.join(self.root, 'train_test_split', 'shuffled_val_file_list.json'), 'r') as f:
             val_ids = set([str(d.split('/')[2]) for d in json.load(f)])
-            if debug:
-                val_ids_debug = set()
-                for i in range(100):
-                    val_ids_debug.add(val_ids.pop())
-                val_ids = val_ids_debug
         with open(os.path.join(self.root, 'train_test_split', 'shuffled_test_file_list.json'), 'r') as f:
             test_ids = set([str(d.split('/')[2]) for d in json.load(f)])
         for item in self.cat:
@@ -95,6 +85,8 @@ class PartNormalDataset(Dataset):
 
         self.cache = {}  # from index to (point_set, cls, seg) tuple
         self.cache_size = 20000
+        if cache:
+            self.prepare_cache()
 
 
     def __getitem__(self, index):
@@ -109,10 +101,8 @@ class PartNormalDataset(Dataset):
             if not self.normal_channel:
                 point_set = data[:, 0:3]
             else:
-                point_set = data[:, 0:6]
+                point_set = data[:, 3:6]
             seg = data[:, -1].astype(np.int32)
-            if len(self.cache) < self.cache_size:
-                self.cache[index] = (point_set, cls, seg)
         point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
 
         choice = np.random.choice(len(seg), self.npoints, replace=True)
@@ -126,6 +116,8 @@ class PartNormalDataset(Dataset):
         return {"point_set":point_set, "cls":cls, "seg":seg, "graph":graph}
 
     def __len__(self):
+        if self.config.DEBUG.ENABLE:
+            return self.config.DEBUG.NUM_SAMPLES
         return len(self.datapath)
 
     
@@ -166,3 +158,18 @@ class PartNormalDataset(Dataset):
         rows, cols = np.where(graph == 1)
         edge_list = torch.tensor(list(zip(rows, cols)), dtype=torch.long).permute(1,0)
         return {"points":point_set, "label":cls, "target":seg, "edge_list":edge_list}
+    
+    def prepare_cache(self):
+        for index in range(self.__len__()):
+            fn = self.datapath[index]
+            cat = self.datapath[index][0]
+            cls = self.classes[cat]
+            cls = np.array([cls]).astype(np.int32)
+            data = np.loadtxt(fn[1]).astype(np.float32)
+            if not self.normal_channel:
+                point_set = data[:, 0:3]
+            else:
+                point_set = data[:, 3:6]
+            seg = data[:, -1].astype(np.int32)
+            if len(self.cache) < self.cache_size:
+                self.cache[index] = (point_set, cls, seg)
