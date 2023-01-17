@@ -3,3 +3,5 @@ GPN
 *.vscode*
 *.pyc
 visualize
+logs
+wandb
