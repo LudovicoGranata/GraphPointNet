@@ -142,7 +142,7 @@ class PartNormalDataset(Dataset):
 
         # Extract the indices of the nearest neighbors, ignoring the point itself
         nearest_neighbors = edges[1][:, 1:num_connections+1]
-        
+
         adjacency_matrix = [[i, l] for i in range(nearest_neighbors.shape[0]) for l in nearest_neighbors[i]]
         
         return adjacency_matrix
@@ -160,7 +160,7 @@ class PartNormalDataset(Dataset):
 
         add_offset = torch.tensor([point_set.shape[1]*i for i in range(point_set.shape[0])])
         add_offset = add_offset.view(-1,1,1)
-        edge_list = (graph + add_offset).view(2, -1)
+        edge_list = (graph + add_offset).reshape(-1, 2).permute(1,0)
 
         return {"points":point_set, "label":cls, "target":seg, "edge_list":edge_list}
     
