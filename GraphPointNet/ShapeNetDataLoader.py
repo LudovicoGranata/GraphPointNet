@@ -1,4 +1,3 @@
-import itertools
 import os
 import json
 import warnings
@@ -7,7 +6,8 @@ from torch.utils.data import Dataset
 warnings.filterwarnings('ignore')
 from scipy.spatial import cKDTree
 import torch
-from scipy.linalg import block_diag
+from tqdm import tqdm
+
 
 def pc_normalize(pc):
     centroid = np.mean(pc, axis=0)
@@ -61,6 +61,10 @@ class PartNormalDataset(Dataset):
             else:
                 print('Unknown split: %s. Exiting..' % (split))
                 exit(-1)
+            
+            self.cache_root = os.path.join(self.root, 'cache', split)
+            if not os.path.exists(self.cache_root):
+                os.makedirs(self.cache_root)
 
             # print(os.path.basename(fns))
             for fn in fns:
@@ -87,11 +91,12 @@ class PartNormalDataset(Dataset):
         self.cache_size = 20000
         if cache:
             self.prepare_cache()
+    
 
 
     def __getitem__(self, index):
         if index in self.cache:
-            point_set, cls, seg = self.cache[index]
+            point_set, cls, seg, graph = self.cache[index]
         else:
             fn = self.datapath[index]
             cat = self.datapath[index][0]
@@ -103,15 +108,15 @@ class PartNormalDataset(Dataset):
             else:
                 point_set = data[:, 3:6]
             seg = data[:, -1].astype(np.int32)
-        point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
+            point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
+        
+            choice = np.random.choice(len(seg), self.npoints, replace=True)
+            # resample
+            point_set = point_set[choice, :]
+            seg = seg[choice]
+            # build graph index
+            graph = self.build_edge_index (point_set)   
 
-        choice = np.random.choice(len(seg), self.npoints, replace=True)
-        # resample
-        point_set = point_set[choice, :]
-        seg = seg[choice]
-
-        # build graph index
-        graph = self.build_edge_index (point_set)
 
         return {"point_set":point_set, "cls":cls, "seg":seg, "graph":graph}
 
@@ -138,9 +143,7 @@ class PartNormalDataset(Dataset):
         # Extract the indices of the nearest neighbors, ignoring the point itself
         nearest_neighbors = edges[1][:, 1:num_connections+1]
         
-        # I select each point with np.arange, then for each of these point I select the nearest neighbors
-        adjacency_matrix = np.zeros((points.shape[0], points.shape[0]))      
-        adjacency_matrix[np.arange(points.shape[0])[:, None], nearest_neighbors] = 1
+        adjacency_matrix = [[i, l] for i in range(nearest_neighbors.shape[0]) for l in nearest_neighbors[i]]
         
         return adjacency_matrix
 
@@ -149,18 +152,20 @@ class PartNormalDataset(Dataset):
         point_set = [item["point_set"] for item in batch]
         cls = [item["cls"] for item in batch]
         seg = [item["seg"] for item in batch]
-        graph = [item["graph"] for item in batch]
+        graph = torch.tensor([item["graph"] for item in batch])
 
         point_set = torch.tensor(point_set, dtype=torch.float)
         cls = torch.tensor(cls, dtype=torch.long)
         seg = torch.tensor(seg, dtype=torch.long)
-        graph = block_diag(*graph)
-        rows, cols = np.where(graph == 1)
-        edge_list = torch.tensor(list(zip(rows, cols)), dtype=torch.long).permute(1,0)
+
+        add_offset = torch.tensor([point_set.shape[1]*i for i in range(point_set.shape[0])])
+        add_offset = add_offset.view(-1,1,1)
+        edge_list = (graph + add_offset).view(2, -1)
+
         return {"points":point_set, "label":cls, "target":seg, "edge_list":edge_list}
     
     def prepare_cache(self):
-        for index in range(self.__len__()):
+        for index in tqdm(range(self.__len__()), "Preparing cache"):
             fn = self.datapath[index]
             cat = self.datapath[index][0]
             cls = self.classes[cat]
@@ -171,5 +176,14 @@ class PartNormalDataset(Dataset):
             else:
                 point_set = data[:, 3:6]
             seg = data[:, -1].astype(np.int32)
+            point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
+            
+            choice = np.random.choice(len(seg), self.npoints, replace=True)
+            # resample
+            point_set = point_set[choice, :]
+            seg = seg[choice]
+            # build graph index
+            graph = self.build_edge_index (point_set)
+
             if len(self.cache) < self.cache_size:
-                self.cache[index] = (point_set, cls, seg)
+                self.cache[index] = (point_set, cls, seg, graph)    
