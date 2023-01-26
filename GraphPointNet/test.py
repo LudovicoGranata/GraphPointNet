@@ -2,7 +2,8 @@ from genericpath import exists
 import os
 import torch
 import wandb
-from mmcv import Config
+import yaml
+from munch import Munch
 from ShapeNetDataLoader import PartNormalDataset
 from model import get_model, get_loss
 from tqdm import tqdm
@@ -14,7 +15,10 @@ from visualization import visualize_point_cloud
 
 
 #CONFIG
-config = Config.fromfile('GraphPointNet/config.py')
+with open('GraphPointNet/config.yaml', 'rt', encoding='utf-8') as f:
+    config = yaml.load(f, Loader=yaml.FullLoader)
+config = Munch.fromDict(config)
+
 if config.MODEL.NAME == "PNPP":
     from pointnet2_model import get_model, get_loss
 elif config.MODEL.NAME == "GPN":
@@ -66,7 +70,10 @@ def main():
 
     #============MODEL===============
     #--------------------------------
-    model = get_model(num_classes=num_part)
+    if config.MODEL.NAME == "PNPP":
+        model = get_model(num_classes=num_part)
+    elif config.MODEL.NAME == "GPN":
+        model = get_model(num_classes=num_classes, graph_type=config.MODEL.GRAPH_TYPE)
     model.to(device)
 
     #============CRITERION===============

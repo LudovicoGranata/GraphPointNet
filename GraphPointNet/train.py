@@ -4,7 +4,8 @@ from genericpath import exists
 import os
 import torch
 import wandb
-from mmcv import Config
+import yaml
+from munch import Munch
 from ShapeNetDataLoader import PartNormalDataset
 from model import get_model, get_loss
 from tqdm import tqdm
@@ -13,9 +14,11 @@ import provider
 import logging
 from datetime import datetime
 
-
 #CONFIG
-config = Config.fromfile('GraphPointNet/config.py')
+with open('GraphPointNet/config.yaml', 'rt', encoding='utf-8') as f:
+    config = yaml.load(f, Loader=yaml.FullLoader)
+config = Munch.fromDict(config)
+
 if config.MODEL.NAME == "PNPP":
     from pointnet2_model import get_model, get_loss
 elif config.MODEL.NAME == "GPN":
@@ -42,6 +45,10 @@ project_name = config.TRAIN.WANDB_PROJECT
 normal_channel = config.DATASET.NORMAL_CHANNEL
 
 npoints = config.DATASET.NUMBER_OF_POINTS
+
+early_stopping = config.TRAIN.EARLY_STOPPING
+patience = config.TRAIN.PATIENCE
+restore_best_weights = config.TRAIN.RESTORE_BEST_WEIGHTS
 
 seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43],
                'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37],
@@ -78,7 +85,10 @@ def main():
 
     #============MODEL===============
     #--------------------------------
-    model = get_model(num_classes=num_part)
+    if config.MODEL.NAME == "PNPP":
+        model = get_model(num_classes=num_part, normal_channel=normal_channel)
+    elif config.MODEL.NAME == "GPN":
+        model = get_model(num_classes=num_part, graph_type=config.MODEL.GRAPH_TYPE, normal_channel=normal_channel)
     model.to(device)
 
     #============CRITERION===============
@@ -134,8 +144,13 @@ def main():
 
 def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_epoch, save_checkpoint, save_checkpoint_path, wandb_log,  device):
 
+
+    if early_stopping:
+        min_loss_val = float('inf')
+        patience_counter = 0
+
     for epoch in range(start_epoch, epochs):
-        train_accuracy = train(
+        train_accuracy, loss_train = train(
             model,
             dl_train,
             criterion,
@@ -144,7 +159,7 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_e
             device,
             wandb_log)
 
-        val_metrics = validate(
+        val_metrics, loss_val = validate(
             model,
             dl_val,
             criterion,
@@ -161,25 +176,66 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_e
         lr =  optimizer.param_groups[0]['lr']
 
         logger.info(f'Epoch: {epoch} '
-              f' Lr: {lr:.8f} '
-              f' Accuracy : Train_accuracy = [{train_accuracy:.3E}]'
-              f' Val_accuracy = [{val_metrics["accuracy"]:.3E}]]'
-              f' Val_inctance_avg_iou = [{val_metrics["inctance_avg_iou"]:.3E}]]'
-              f' Val_class_avg_iou = [{val_metrics["class_avg_iou"]:.3E}]]'
+              f' Lr: {lr:.3E} '
+              f'Loss_train: {loss_train:.3E} '
+              f'Loss_val: {loss_val:.3E} '
+              f'Train_accuracy = [{train_accuracy:.3E}]'
+              f'Val_accuracy = [{val_metrics["accuracy"]:.3E}]]'
+              f'Val_instance_avg_iou = [{val_metrics["inctance_avg_iou"]:.3E}]]'
+              f'Val_class_avg_iou = [{val_metrics["class_avg_iou"]:.3E}]]'
               )
 
         if wandb_log:
             wandb.log({'Learning_Rate': lr, 
+            'Loss_train': loss_train,
+            'Loss_val': loss_val,
             'Train_accuracy': train_accuracy,
             'Validation_accuracy': val_metrics["accuracy"], 
             'Validation_class_avg_iou': val_metrics['class_avg_iou'], 
             'Validation_inctance_avg_iou': val_metrics['inctance_avg_iou'], 
             'Epoch': epoch})
 
+        
+        # Early stopping
+        if early_stopping:
+            if loss_val < min_loss_val:
+                min_loss_val = loss_val
+                patience_counter = 0
+                if restore_best_weights:
+                    torch.save({
+                        'epoch': epoch,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        }, save_checkpoint_path.rsplit("/", 1)[0]+"/best_weights.pth")
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    print(f"Early stopping: patience {patience} reached")
+                    if restore_best_weights:
+                        best_model = torch.load(save_checkpoint_path.rsplit("/", 1)[0]+"/best_weights.pth")
+                        torch.save({
+                            'epoch': best_model["epoch"],
+                            'model_state_dict': best_model["model_state_dict"],
+                            'optimizer_state_dict': best_model["optimizer_state_dict"],
+                            }, save_checkpoint_path)
+                        print(f"Best model at epoch {best_model['epoch']} restored")
+                    break
+        
+    # save model to wandb
+    if wandb_log:
+        if config.TRAIN.WANDB_SAVE_MODEL:
+            artifact = wandb.Artifact('model', type='model')
+            artifact.add_file(save_checkpoint_path)
+            wandb.log_artifact(artifact)
+            logger.info("Model saved to wandb")
+        # close wandb
+        wandb.finish()
+
 
 def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
 
     mean_correct = []
+    losses = []
     model.train()
     lr = max(config.SOLVER.LR * (config.SOLVER.LR_DECAY ** (epoch // config.SOLVER.LR_STEP_SIZE)), config.SOLVER.MIN_LR)
     
@@ -208,14 +264,14 @@ def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
         loss = criterion(seg_pred, target, trans_feat)
         loss.backward()
         optimizer.step()
-
+        losses.append(loss.item())
         if wandb_log:
             global_step = epoch * len(dl_train) + idx_batch
-            wandb.log({'Accuracy': np.mean(mean_correct), 'Global_step': global_step})
+            wandb.log({'Loss': loss, 'Accuracy': np.mean(mean_correct), 'Global_step': global_step})
 
     train_instance_acc = np.mean(mean_correct)
     logger.info('Train accuracy is: %.5f' % train_instance_acc)
-    return train_instance_acc
+    return train_instance_acc, np.mean(losses)
 
 
 
@@ -223,6 +279,7 @@ def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
 def validate(model, dl_val, criterion, device):
     with torch.no_grad():
         test_metrics = {}
+        losses = []
         total_correct = 0
         total_seen = 0
         total_seen_class = [0 for _ in range(num_part)]
@@ -248,11 +305,18 @@ def validate(model, dl_val, criterion, device):
                 seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
             else:
                 seg_pred, trans_feat = model(points, to_categorical(label, num_classes))
+            
+            seg_pred_loss = seg_pred.contiguous().view(-1, num_part)
+            target_loss = target.view(-1, 1)[:, 0]
+            loss = criterion(seg_pred_loss, target_loss, trans_feat)
+            losses.append(loss.item())
 
             cur_pred_val = seg_pred.cpu().data.numpy()
             cur_pred_val_logits = cur_pred_val
             cur_pred_val = np.zeros((cur_batch_size, NUM_POINT)).astype(np.int32)
             target = target.cpu().data.numpy()
+
+
 
             for i in range(cur_batch_size):
                 cat = seg_label_to_cat[target[i, 0]]
@@ -296,7 +360,7 @@ def validate(model, dl_val, criterion, device):
         test_metrics['inctance_avg_iou'] = np.mean(all_shape_ious)
 
 
-    return test_metrics
+    return test_metrics, np.mean(losses)
 
 def set_logger(log_file):
 

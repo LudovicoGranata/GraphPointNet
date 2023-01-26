@@ -106,7 +106,7 @@ class PartNormalDataset(Dataset):
             if not self.normal_channel:
                 point_set = data[:, 0:3]
             else:
-                point_set = data[:, 3:6]
+                point_set = data[:, 0:6]
             seg = data[:, -1].astype(np.int32)
             point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
         

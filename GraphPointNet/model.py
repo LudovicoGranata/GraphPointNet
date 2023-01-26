@@ -10,7 +10,7 @@ import torch_geometric.nn as pyg_nn
 
 
 class get_model(nn.Module):
-    def __init__(self, num_classes, normal_channel=False):
+    def __init__(self, num_classes, normal_channel=False, graph_type="GCN"):
         super(get_model, self).__init__()
         if normal_channel:
             additional_channel = 3
@@ -27,11 +27,7 @@ class get_model(nn.Module):
         self.bn1 = nn.BatchNorm1d(128)
         self.drop1 = nn.Dropout(0.5)
         self.conv2 = nn.Conv1d(128, num_classes, 1)
-        self.GCN = GCN(128, 128)
-
-        # TODO delete this
-        # self.fc1 = nn.Linear(128, 128)
-        # self.fc2 = nn.Linear(128, num_classes)
+        self.GCN = GCN(dim=128, graph_type=graph_type)
 
     def forward(self, xyz, cls_label, point_graph):
         # Set Abstraction layers
@@ -53,12 +49,6 @@ class get_model(nn.Module):
 
         x = self.GCN(l0_points.permute(0,2,1), point_graph).permute(0,2,1)# l0_points shape (B, N, F)
         
-        # TODO delete this
-        # x = self.fc1(self.relu(x))
-        # x = self.fc2(self.relu(x))
-        # x = F.log_softmax(x, dim=2)
-
-        # feat = F.relu(self.bn1(self.conv1(l0_points)))
         feat = F.relu(self.bn1(self.conv1(x)))
         x = self.drop1(feat)
         x = self.conv2(x)
@@ -68,13 +58,21 @@ class get_model(nn.Module):
         return x, l3_points
 
 class GCN (nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, dim, n_layers=3, heads=4, dropout=0.2, graph_type = "GCN"):
         super(GCN, self).__init__()
-        self.conv_1 = pyg_nn.GCNConv(in_channels, 256)
-        self.conv_2 = pyg_nn.GCNConv(256, 256)
-        self.conv_3 = pyg_nn.GCNConv(256, out_channels)
-        self.drop1 = nn.Dropout(0.4)
-        # self.bn1 = nn.BatchNorm1d(128)
+
+        self.relu = nn.ReLU()
+        if graph_type == "GCN" :
+            layers = []
+            for _ in range(n_layers):
+                layers.append(pyg_nn.GCNConv(dim, dim))
+            self.graph_conv = nn.ModuleList(layers)
+
+        if graph_type == "GAT" :
+            layers = []
+            for _ in range(n_layers ):
+                layers.append(pyg_nn.GATConv(dim, dim, heads=heads, concat=False, dropout=dropout))
+            self.graph_conv = nn.ModuleList(layers)
 
     def forward(self, x, batch_edge_index):
 
@@ -83,11 +81,10 @@ class GCN (nn.Module):
         n_points = x.shape[1]
         x = x.reshape(-1, x.shape[-1])
 
-        x = F.relu(self.conv_1(x, batch_edge_index))
-        x = self.drop1(x)
-        x = F.relu(self.conv_2(x, batch_edge_index))
-        x = self.drop1(x)
-        x = F.relu(self.conv_3(x, batch_edge_index))
+        for i, layer in enumerate(self.graph_conv):
+            x = layer(x, batch_edge_index)
+            x = self.relu(x)
+            
         x = x.reshape(n_batch, n_points, x.shape[-1])
         return x
 

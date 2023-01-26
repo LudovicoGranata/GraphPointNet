@@ -1,58 +1,67 @@
-DEVICE = "cuda:0" # cuda:0
-DEBUG = dict(
-    ENABLE = False,
-    NUM_SAMPLES = 20,
-    )
+---
+
+DEVICE : "cuda:0" # cuda:0
+DEBUG :
+    ENABLE : False
+    NUM_SAMPLES : 20 
+    
 
 # -----------------------------------------------------------------------------
 # Dataset
 # -------------------------------------------------------------------------
-DATASET = dict(
-    NUM_CONNECTIONS = 3,
-    NUMBER_OF_POINTS = 2048,
-    NORMAL_CHANNEL = True
-    )
+DATASET :
+    NUM_CONNECTIONS : 3 
+    NUMBER_OF_POINTS : 2048 
+    NORMAL_CHANNEL : True
+    
 
 # -----------------------------------------------------------------------------
 # DataLoader
 # -----------------------------------------------------------------------------
-DATALOADER = dict(
-    BATCH_SIZE = 4,
-    NUM_WORKERS = 4,
-    CACHE = True,
-)
+DATALOADER :
+    BATCH_SIZE : 4 
+    NUM_WORKERS : 4 
+    CACHE : False 
 
-MODEL = dict(
-    NAME = "GPN" # GPN | PNPP
-)
+
+MODEL :
+    NAME : "GPN"  # GPN | PNPP
+    GRAPH_TYPE : "GAT" # GCN | GAT
+
 
 # ---------------------------------------------------------------------------- #
 # Solver
 # ---------------------------------------------------------------------------- #
-SOLVER = dict(
-    LR = 0.001,
-    EPOCHS = 300,
-    MIN_LR = 1e-5,
-    LR_DECAY = 0.5,
-    LR_STEP_SIZE = 20
-)
+SOLVER :
+    LR : 0.001 
+    EPOCHS : 200 
+    MIN_LR : 1.0e-5 
+    LR_DECAY : 0.5 
+    LR_STEP_SIZE : 20
+
 
 # ---------------------------------------------------------------------------- #
 # Specific train options
 # ---------------------------------------------------------------------------- #
-TRAIN = dict(
-    SAVE_CHECKPOINT = True,
-    SAVE_CHECKPOINT_PATH = "checkpoints/GPN/GPN.pth",
-    LOAD_CHECKPOINT = False,
-    LOAD_CHECKPOINT_PATH = "checkpoints/GPN/GPN.pth",
-    WANDB_LOG = False,
-    WANDB_PROJECT = "GPN",
-)
+TRAIN :
+    SAVE_CHECKPOINT : True 
+    SAVE_CHECKPOINT_PATH : "checkpoints/GPN/GPN.pth" 
+    LOAD_CHECKPOINT : False 
+    LOAD_CHECKPOINT_PATH : "checkpoints/GPN/GPN.pth" 
+    WANDB_LOG : True
+    WANDB_PROJECT : "GPN" 
+    WANDB_SAVE_MODEL : True 
+    EARLY_STOPPING : True 
+    PATIENCE : 10
+    RESTORE_BEST_WEIGHTS : True
+
 
 # ---------------------------------------------------------------------------- #
 # Specific test options
 # ---------------------------------------------------------------------------- #
-TEST = dict(
-    LOAD_CHECKPOINT_PATH = "checkpoints/GPN/GPN_77e.pth",
-    VISUALIZE = False,
-)
+TEST :
+    LOAD_CHECKPOINT_PATH : "checkpoints/GPN/GPN_77e.pth" 
+    VISUALIZE : False 
+
+
+...
