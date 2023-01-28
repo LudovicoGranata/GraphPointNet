@@ -115,7 +115,8 @@ class PartNormalDataset(Dataset):
             point_set = point_set[choice, :]
             seg = seg[choice]
             # build graph index
-            graph = self.build_edge_index (point_set)   
+            graph = self.build_edge_index (point_set[:,0:3])
+
 
 
         return {"point_set":point_set, "cls":cls, "seg":seg, "graph":graph}
@@ -128,39 +129,44 @@ class PartNormalDataset(Dataset):
     
     def build_edge_index(self, points):
 
-        #number of connections for each point
-        num_connections = self.config.DATASET.NUM_CONNECTIONS
+        # #number of connections for each point
+        # num_connections = self.config.DATASET.NUM_CONNECTIONS
 
-        if num_connections >= points.shape[0]:
-            num_connections = points.shape[0]-1
+        # if num_connections >= points.shape[0]:
+        #     num_connections = points.shape[0]-1
 
-        # Build a KD-tree from the points
+        # # Build a KD-tree from the points
         tree = cKDTree(points)
 
-        # Find the indices and distances of the k nearest neighbors for each point
-        edges = tree.query(points, k=num_connections+1)
+        # # Find the indices and distances of the k nearest neighbors for each point
+        # edges = tree.query(points, k=num_connections+1)
 
-        # Extract the indices of the nearest neighbors, ignoring the point itself
-        nearest_neighbors = edges[1][:, 1:num_connections+1]
+        # # Extract the indices of the nearest neighbors, ignoring the point itself
+        # nearest_neighbors = edges[1][:, 1:num_connections+1]
 
-        adjacency_matrix = [[i, l] for i in range(nearest_neighbors.shape[0]) for l in nearest_neighbors[i]]
-        
-        return adjacency_matrix
+        # edges = np.array([[i, l] for i in range(nearest_neighbors.shape[0]) for l in nearest_neighbors[i]])
+
+        edges = tree.query_pairs(r = 0.05, output_type='ndarray')
+        edges_reversed = np.flip(edges, axis=1)
+        edges = np.concatenate((edges, edges_reversed), axis=0)
+
+        # prova = [np.linalg.norm(points[i] - points[j]) for i,j in edges]
+
+        return edges
 
     def my_collate(self, batch):
         
         point_set = [item["point_set"] for item in batch]
-        cls = [item["cls"] for item in batch]
-        seg = [item["seg"] for item in batch]
-        graph = torch.tensor([item["graph"] for item in batch])
-
         point_set = torch.tensor(point_set, dtype=torch.float)
+
+        cls = [item["cls"] for item in batch]
         cls = torch.tensor(cls, dtype=torch.long)
+
+        seg = [item["seg"] for item in batch]
         seg = torch.tensor(seg, dtype=torch.long)
 
-        add_offset = torch.tensor([point_set.shape[1]*i for i in range(point_set.shape[0])])
-        add_offset = add_offset.view(-1,1,1)
-        edge_list = (graph + add_offset).reshape(-1, 2).permute(1,0)
+        edge_list = torch.tensor(np.concatenate([item["graph"] + point_set.shape[1]*i  for i,item in enumerate(batch)]))
+        edge_list = edge_list.transpose(0,1)
 
         return {"points":point_set, "label":cls, "target":seg, "edge_list":edge_list}
     
