@@ -146,7 +146,7 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_e
 
 
     if early_stopping:
-        min_loss_val = float('inf')
+        max_loss_val = 0
         patience_counter = 0
 
     for epoch in range(start_epoch, epochs):
@@ -198,8 +198,8 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_e
         
         # Early stopping
         if early_stopping:
-            if loss_val < min_loss_val:
-                min_loss_val = loss_val
+            if val_metrics["accuracy"] > max_loss_val:
+                max_loss_val = loss_val
                 patience_counter = 0
                 if restore_best_weights:
                     torch.save({
