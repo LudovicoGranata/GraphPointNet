@@ -197,7 +197,7 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_e
         # Early stopping
         if early_stopping:
             if val_metrics["accuracy"] > max_loss_val:
-                max_loss_val = loss_val
+                max_loss_val = val_metrics["accuracy"]
                 patience_counter = 0
                 if restore_best_weights:
                     torch.save({
