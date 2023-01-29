@@ -5,11 +5,10 @@ import wandb
 import yaml
 from munch import Munch
 from ShapeNetDataLoader import PartNormalDataset
-from model import get_model, get_loss
+from GraphPointNet.models.GPN import get_model, get_loss
 from tqdm import tqdm
 import numpy as np
 import provider
-from scipy.spatial import cKDTree
 from visualization import visualize_point_cloud
 
 
@@ -19,12 +18,17 @@ with open('GraphPointNet/config.yaml', 'rt', encoding='utf-8') as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 config = Munch.fromDict(config)
 
-if config.MODEL.NAME == "PNPP":
-    from pointnet2_model import get_model, get_loss
+if config.MODEL.NAME == "PN":
+    from models.PN import get_model, get_loss
 elif config.MODEL.NAME == "GPN":
-    from model import get_model, get_loss
+    from models.GPN import get_model, get_loss
+elif config.MODEL.NAME == "PN2":
+    from models.PN2 import get_model, get_loss
+elif config.MODEL.NAME == "GPN2":
+    from models.GPN2 import get_model, get_loss
 else:
     raise ValueError("Model not found")
+
 device = config.DEVICE
 
 batch_size = config.DATALOADER.BATCH_SIZE
@@ -36,7 +40,7 @@ load_checkpoint_path = config.TEST.LOAD_CHECKPOINT_PATH
 visualize = config.TEST.VISUALIZE
 
 npoints = config.DATASET.NUMBER_OF_POINTS
-normal_channel = config.DATASET.NORMAL_CHANNEL
+normal_channel = config.MODEL.NORMAL_CHANNEL
 
 seg_classes = {'Earphone': [16, 17, 18], 'Motorbike': [30, 31, 32, 33, 34, 35], 'Rocket': [41, 42, 43],
                'Car': [8, 9, 10, 11], 'Laptop': [28, 29], 'Cap': [6, 7], 'Skateboard': [44, 45, 46], 'Mug': [36, 37],
@@ -48,7 +52,7 @@ for cat in seg_classes.keys():
         seg_label_to_cat[label] = cat
 
 num_classes = 16
-num_part = 50
+part_num = 50
 
 
 def to_categorical(y, num_classes):
@@ -70,10 +74,8 @@ def main():
 
     #============MODEL===============
     #--------------------------------
-    if config.MODEL.NAME == "PNPP":
-        model = get_model(num_classes=num_part)
-    elif config.MODEL.NAME == "GPN":
-        model = get_model(num_classes=num_classes, graph_type=config.MODEL.GRAPH_TYPE)
+    model = get_model(config, part_num=part_num)
+
     model.to(device)
 
     #============CRITERION===============
@@ -122,11 +124,9 @@ def test(model, dl_val, visualize, device):
             cur_batch_size, NUM_POINT, _ = points.size()
             points, label, target, edge_list = points.float().to(device), label.long().to(device), target.long().to(device), edge_list.to(device)
             points = points.transpose(2, 1)
-            # point_graph = build_edge_index(points, num_connections=3)
-            # points, point_graph = points.to(device), point_graph.to(device)
-            if config.MODEL.NAME == "GPN":
+            if config.MODEL.NAME == "GPN" or config.MODEL.NAME == "GPN2":
                 seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
-            else:
+            elif config.MODEL.NAME == "PN" or config.MODEL.NAME == "PN2":
                 seg_pred, trans_feat = model(points, to_categorical(label, num_classes))
             cur_pred_val = seg_pred.cpu().data.numpy()
             cur_pred_val_logits = cur_pred_val

@@ -7,7 +7,6 @@ import wandb
 import yaml
 from munch import Munch
 from ShapeNetDataLoader import PartNormalDataset
-from model import get_model, get_loss
 from tqdm import tqdm
 import numpy as np
 import provider
@@ -19,10 +18,14 @@ with open('GraphPointNet/config.yaml', 'rt', encoding='utf-8') as f:
     config = yaml.load(f, Loader=yaml.FullLoader)
 config = Munch.fromDict(config)
 
-if config.MODEL.NAME == "PNPP":
-    from pointnet2_model import get_model, get_loss
+if config.MODEL.NAME == "PN":
+    from models.PN import get_model, get_loss
 elif config.MODEL.NAME == "GPN":
-    from model import get_model, get_loss
+    from models.GPN import get_model, get_loss
+elif config.MODEL.NAME == "PN2":
+    from models.PN2 import get_model, get_loss
+elif config.MODEL.NAME == "GPN2":
+    from models.GPN2 import get_model, get_loss
 else:
     raise ValueError("Model not found")
 
@@ -42,7 +45,7 @@ load_checkpoint = config.TRAIN.LOAD_CHECKPOINT
 load_checkpoint_path = config.TRAIN.LOAD_CHECKPOINT_PATH
 wandb_log = config.TRAIN.WANDB_LOG
 project_name = config.TRAIN.WANDB_PROJECT
-normal_channel = config.DATASET.NORMAL_CHANNEL
+normal_channel = config.MODEL.NORMAL_CHANNEL
 
 npoints = config.DATASET.NUMBER_OF_POINTS
 
@@ -60,7 +63,7 @@ for cat in seg_classes.keys():
         seg_label_to_cat[label] = cat
 
 num_classes = 16
-num_part = 50
+part_num = 50
 
 def to_categorical(y, num_classes):
     """ 1-hot encodes a tensor """
@@ -80,15 +83,12 @@ def main():
     dl_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True, drop_last=True, collate_fn=data_train.my_collate)
 
     # VAL DATA
-    data_val = PartNormalDataset(split="test", npoints=npoints, normal_channel=normal_channel, config=config, cache=cache)
+    data_val = PartNormalDataset(split="val", npoints=npoints, normal_channel=normal_channel, config=config, cache=cache)
     dl_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, collate_fn=data_val.my_collate)
 
     #============MODEL===============
     #--------------------------------
-    if config.MODEL.NAME == "PNPP":
-        model = get_model(num_classes=num_part, normal_channel=normal_channel)
-    elif config.MODEL.NAME == "GPN":
-        model = get_model(num_classes=num_part, graph_type=config.MODEL.GRAPH_TYPE, normal_channel=normal_channel)
+    model = get_model(config = config, part_num=part_num)
     model.to(device)
 
     #============CRITERION===============
@@ -117,9 +117,7 @@ def main():
         if exists(load_checkpoint_path):
             checkpoint = torch.load(load_checkpoint_path)
             start_epoch = checkpoint['epoch']
-
             model.load_state_dict(checkpoint['model_state_dict'])
-            # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         else:
             raise ValueError("Checkpoint not found")
 
@@ -205,7 +203,6 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_e
                     torch.save({
                         'epoch': epoch,
                         'model_state_dict': model.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
                         }, save_checkpoint_path.rsplit("/", 1)[0]+"/best_weights.pth")
             else:
                 patience_counter += 1
@@ -216,7 +213,6 @@ def training_loop(model, dl_train, dl_val, criterion, optimizer, epochs, start_e
                         torch.save({
                             'epoch': best_model["epoch"],
                             'model_state_dict': best_model["model_state_dict"],
-                            'optimizer_state_dict': best_model["optimizer_state_dict"],
                             }, save_checkpoint_path)
                         print(f"Best model at epoch {best_model['epoch']} restored")
                     break
@@ -251,11 +247,12 @@ def train(model, dl_train, criterion, optimizer, epoch, device, wandb_log):
         points = torch.Tensor(points)
         points, label, target, edge_list = points.float().to(device), label.long().to(device), target.long().to(device), edge_list.to(device)
         points = points.transpose(2, 1)
-        if config.MODEL.NAME == "GPN":
+        if config.MODEL.NAME == "GPN" or config.MODEL.NAME == "GPN2":
             seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
-        else:
+        elif config.MODEL.NAME == "PN" or config.MODEL.NAME == "PN2":
             seg_pred, trans_feat = model(points, to_categorical(label, num_classes))
-        seg_pred = seg_pred.contiguous().view(-1, num_part)
+
+        seg_pred = seg_pred.contiguous().view(-1, part_num)
         target = target.view(-1, 1)[:, 0]
         pred_choice = seg_pred.data.max(1)[1]
 
@@ -282,8 +279,8 @@ def validate(model, dl_val, criterion, device):
         losses = []
         total_correct = 0
         total_seen = 0
-        total_seen_class = [0 for _ in range(num_part)]
-        total_correct_class = [0 for _ in range(num_part)]
+        total_seen_class = [0 for _ in range(part_num)]
+        total_correct_class = [0 for _ in range(part_num)]
         shape_ious = {cat: [] for cat in seg_classes.keys()}
         seg_label_to_cat = {}  # {0:Airplane, 1:Airplane, ...49:Table}
 
@@ -299,14 +296,12 @@ def validate(model, dl_val, criterion, device):
             cur_batch_size, NUM_POINT, _ = points.size()
             points, label, target, edge_list = points.float().to(device), label.long().to(device), target.long().to(device), edge_list.to(device)
             points = points.transpose(2, 1)
-            # point_graph = build_edge_index(points, num_connections=3)
-            # points, point_graph = points.to(device), point_graph.to(device)
-            if config.MODEL.NAME == "GPN":
+            if config.MODEL.NAME == "GPN" or config.MODEL.NAME == "GPN2":
                 seg_pred, trans_feat = model(points, to_categorical(label, num_classes), edge_list)
-            else:
+            elif config.MODEL.NAME == "PN" or config.MODEL.NAME == "PN2":
                 seg_pred, trans_feat = model(points, to_categorical(label, num_classes))
             
-            seg_pred_loss = seg_pred.contiguous().view(-1, num_part)
+            seg_pred_loss = seg_pred.contiguous().view(-1, part_num)
             target_loss = target.view(-1, 1)[:, 0]
             loss = criterion(seg_pred_loss, target_loss, trans_feat)
             losses.append(loss.item())
@@ -327,7 +322,7 @@ def validate(model, dl_val, criterion, device):
             total_correct += correct
             total_seen += (cur_batch_size * NUM_POINT)
 
-            for l in range(num_part):
+            for l in range(part_num):
                 total_seen_class[l] += np.sum(target == l)
                 total_correct_class[l] += (np.sum((cur_pred_val == l) & (target == l)))
 

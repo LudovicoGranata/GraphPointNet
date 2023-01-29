@@ -10,10 +10,12 @@ DEBUG :
 # Dataset
 # -------------------------------------------------------------------------
 DATASET :
-    NUM_CONNECTIONS : 3 
-    NUMBER_OF_POINTS : 2048 
-    NORMAL_CHANNEL : True
-    
+    NUMBER_OF_POINTS : 1024 
+    GRAPH_BUILD_METHOD: "knn" #knn| ballquery
+    K_NUM_CONNECTIONS : 15
+    MAX_CONNECTIONS: 20000
+    RADIUS: 0.1
+
 
 # -----------------------------------------------------------------------------
 # DataLoader
@@ -25,8 +27,13 @@ DATALOADER :
 
 
 MODEL :
-    NAME : "GPN"  # GPN | PNPP
-    GRAPH_TYPE : "GAT" # GCN | GAT
+    NAME : "PN"  # PN | PN2 | GPN | GPN2
+    NORMAL_CHANNEL : True
+    GNN:
+        GRAPH_TYPE: "GCN" # GCN | GAT
+        N_LAYERS: 3
+        HEADS: 3
+        DROPOUT: 0.5
 
 
 # ---------------------------------------------------------------------------- #
@@ -60,7 +67,7 @@ TRAIN :
 # Specific test options
 # ---------------------------------------------------------------------------- #
 TEST :
-    LOAD_CHECKPOINT_PATH : "checkpoints/GPN/GPN_77e.pth" 
+    LOAD_CHECKPOINT_PATH : "checkpoints/GPN/GPN.pth" 
     VISUALIZE : False 
 
 

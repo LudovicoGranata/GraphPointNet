@@ -129,29 +129,37 @@ class PartNormalDataset(Dataset):
     
     def build_edge_index(self, points):
 
-        # #number of connections for each point
-        # num_connections = self.config.DATASET.NUM_CONNECTIONS
-
-        # if num_connections >= points.shape[0]:
-        #     num_connections = points.shape[0]-1
-
-        # # Build a KD-tree from the points
+        # Build a KD-tree from the points
         tree = cKDTree(points)
 
-        # # Find the indices and distances of the k nearest neighbors for each point
-        # edges = tree.query(points, k=num_connections+1)
+        if self.config.DATASET.GRAPH_BUILD_METHOD == 'knn':
 
-        # # Extract the indices of the nearest neighbors, ignoring the point itself
-        # nearest_neighbors = edges[1][:, 1:num_connections+1]
+            #number of connections for each point
+            num_connections = self.config.DATASET.K_NUM_CONNECTIONS
 
-        # edges = np.array([[i, l] for i in range(nearest_neighbors.shape[0]) for l in nearest_neighbors[i]])
+            if num_connections >= points.shape[0]:
+                num_connections = points.shape[0]-1
 
-        edges = tree.query_pairs(r = 0.05, output_type='ndarray')
-        edges_reversed = np.flip(edges, axis=1)
-        edges = np.concatenate((edges, edges_reversed), axis=0)
+            # Find the indices and distances of the k nearest neighbors for each point
+            edges = tree.query(points, k=num_connections+1)
 
-        # prova = [np.linalg.norm(points[i] - points[j]) for i,j in edges]
+            # Extract the indices of the nearest neighbors, ignoring the point itself
+            nearest_neighbors = edges[1][:, 1:num_connections+1]
 
+            edges = np.array([[i, l] for i in range(nearest_neighbors.shape[0]) for l in nearest_neighbors[i]])
+
+        elif self.config.DATASET.GRAPH_BUILD_METHOD == 'ballquery':
+
+            edges = tree.query_pairs(r = self.config.DATASET.RADIUS, output_type='ndarray')
+            edges_reversed = np.flip(edges, axis=1)
+            edges = np.concatenate((edges, edges_reversed), axis=0)
+        else:
+            raise ValueError('Unknown graph build method: %s' % (self.config.DATASET.GRAPH_BUILD_METHOD))
+
+        if len(edges) > self.config.DATASET.MAX_CONNECTIONS:
+            indices = np.random.choice(len(edges), self.config.DATASET.MAX_CONNECTIONS, replace=False)
+            edges = edges[indices]
+            
         return edges
 
     def my_collate(self, batch):
