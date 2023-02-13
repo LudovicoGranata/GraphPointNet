@@ -156,6 +156,7 @@ class PartNormalDataset(Dataset):
         else:
             raise ValueError('Unknown graph build method: %s' % (self.config.DATASET.GRAPH_BUILD_METHOD))
 
+        # this is to avoid memory issues
         if len(edges) > self.config.DATASET.MAX_CONNECTIONS:
             indices = np.random.choice(len(edges), self.config.DATASET.MAX_CONNECTIONS, replace=False)
             edges = edges[indices]

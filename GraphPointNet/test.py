@@ -5,7 +5,6 @@ import wandb
 import yaml
 from munch import Munch
 from ShapeNetDataLoader import PartNormalDataset
-from GraphPointNet.models.GPN import get_model, get_loss
 from tqdm import tqdm
 import numpy as np
 import provider
@@ -107,8 +106,8 @@ def test(model, dl_val, visualize, device):
         test_metrics = {}
         total_correct = 0
         total_seen = 0
-        total_seen_class = [0 for _ in range(num_part)]
-        total_correct_class = [0 for _ in range(num_part)]
+        total_seen_class = [0 for _ in range(part_num)]
+        total_correct_class = [0 for _ in range(part_num)]
         shape_ious = {cat: [] for cat in seg_classes.keys()}
         seg_label_to_cat = {}  # {0:Airplane, 1:Airplane, ...49:Table}
 
@@ -142,7 +141,7 @@ def test(model, dl_val, visualize, device):
             total_correct += correct
             total_seen += (cur_batch_size * NUM_POINT)
 
-            for l in range(num_part):
+            for l in range(part_num):
                 total_seen_class[l] += np.sum(target == l)
                 total_correct_class[l] += (np.sum((cur_pred_val == l) & (target == l)))
 
