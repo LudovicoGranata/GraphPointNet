@@ -1,5 +1,5 @@
 ![alt text](https://github.com/LudovicoGranata/GraphPointNet/blob/main/plane.png)
-# Project Title
+# Graph PointNet
 
 This study aims to investigate the efficacy of integrating Graph Neural Networks into PointNet and PointNet++ for the task of 3D part segmentation. We perform experiments using Graph Convolutional Networks and Graph Attention Networks, and evaluate two methods for constructing the graph: Nearest Neighbor and Ball Query. Our findings suggest that utilizing Graph Attention Networks and the Ball Query method can yield slightly improved results compared to using PointNet and PointNet++ alone.
 
